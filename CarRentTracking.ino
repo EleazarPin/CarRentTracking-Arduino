@@ -724,6 +724,22 @@ void Bluetooth()
         accionValida=true;
       }
     }
+    else if(operando.equals("getVel"))
+    {
+      operando = "25";
+      HC06.print(operando);
+      accionValida=true;
+    }
+    else if(operando.equals("getMQ7"))
+    {
+      operando = "50";
+      HC06.print(operando);
+      accionValida=true;
+    }
+    else if(operando.equals("getFiles"))
+    {
+      // desarrollar.
+    }    
     Serial.flush();
     HC06.flush();
     if(accionValida)
@@ -732,10 +748,9 @@ void Bluetooth()
       HC06.print('1');
     escribirLogEnSD(linea,accionValida);
     flagBT=false;
-    Serial.flush();
-    HC06.flush();
   }
 }
+
 
 void loop() {
   //Serial.println("1");
@@ -743,7 +758,7 @@ void loop() {
   {
     Serial.println("Hola");
     a = false;
-  }  
+  }
   // GPS();
   // Fotoresistencia();
   // MQ7();
