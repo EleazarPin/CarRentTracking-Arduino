@@ -6,10 +6,8 @@
 #include "MPU6050.h"
 #include "Wire.h"
 #define GPSSerial Serial1
-#define HC06 Serial3
-
+#define HC06 Serial2
 //***************variables para el gps****************************INI*
-bool a = true;
 TinyGPS gps;//Usamos los serial1 pin  Tx1 y  Rx1
 int codGPS;
 float latitude, longitude,latitudeOld, longitudeOld,alturaOld;
@@ -24,9 +22,10 @@ boolean gpsNoCalibrado;
 //***************variables para el bluetooth************************INI*
 boolean flagBT;
 //char c;
-char caracter;
-int found;
+String linea;
+int found,contadoraux;
 boolean accionValida;
+boolean accionConfirmar;
 //***************variables para el bluetooth************************FIN*
 //***************variables para la Foto Resistencia*****************INI*
 boolean flagSensorFotoresistencia;
@@ -54,7 +53,7 @@ const String fileNameTraking = "traking.txt";
 const String fileNameEvento = "evento.txt";
 const String fileNameParametros = "param.txt";
 const String fileNameLog = "registro.log";
-int ledArchivoPin = 30; 
+int ledArchivoPin = 34; 
 //***************variables para el SD*******************************FIN*
 //***************variables para el gy-88****************************INI*
 MPU6050 accel;
@@ -68,6 +67,7 @@ unsigned long transcurridos;
 int ledGY88 = 34;
 bool blinkState = true;
 int limiteAc;// = 5;
+boolean acelerometroActivo;
 //***************variables para el gy-88****************************FIN*
 //***************variables para el cooler***************************INI*
 int TIP120pin = 7; //for this project, I pick Arduino's PMW pin 11
@@ -78,15 +78,16 @@ const int S = 1024; // Number of samples to read in block
 short buffer[S];
 const short vCero=0;
 int volume = 1024;
-const String excesoVel="ev.wav";
+const String excesoVel="vel.wav";
+const String parametroModificado="alarma.wav";
 const String humoDetectado="humo.wav";
-const String encenderLuces="sos.wav";
+const String encenderLuces="luces.wav";
 const String aceleracionBruzca="alarma.wav";
 //***************variables para el reproductor de audio*************FIN*
 //***************variables extras***********************************INI*
 int limiteHoraInicialNoche = 19;
 int limiteMinutosInicialNoche = 30;
-int limiteHoraFinalNoche = 6;
+int limiteHoraFinalNoche = 10;
 int limiteMinutosFinalNoche = 30;
 int hActual,mActual;
 boolean flagExesoVel;
@@ -104,7 +105,9 @@ void setearPines()
   pinMode(sensorFotoresistenciaPin, INPUT);
   pinMode(ledFotoresistenciaPin, OUTPUT);
   pinMode(ledSensorMQ7Pin, OUTPUT);
-  pinMode(ledGY88, OUTPUT);
+  //pinMode(ledGY88, OUTPUT);
+  pinMode(ledExcesoVelPin, OUTPUT);
+  pinMode(ledArchivoPin, OUTPUT);
   pinMode(ledONPin, OUTPUT);
   pinMode(shieldSDPin, OUTPUT);
   digitalWrite(ledFotoresistenciaPin, LOW);
@@ -114,9 +117,10 @@ void setearPines()
 
 void inicializar()
 {
-//  c=' ';
-  //limVel = 60;
+  acelerometroActivo=true;
+  contadoraux=0;
   flagBT=false;
+  linea="";
   velCooler = 255;
   hardCodModoNocturno=false;
   gpsNoCalibrado = true;
@@ -126,21 +130,22 @@ void inicializar()
   flagExesoVel = false;
   confirmacionHumo = false;
   confirmacionNoHumo = false;
-  contFotoresistencia=100;
-  contadorHD=50;
+  contFotoresistencia=25;
+  contadorHD=30;
   maxVel = -1;
   latitudeOld = 0;
   longitudeOld = 0;
   alturaOld = -1;
   hActual=7;
   mActual=0;
-  //GPSSerial.begin(9600);//Iniciamos el puerto serie del gps
-  //GPSSerial.flush();
-  HC06.begin(9600);//Iniciamos el puerto serie del bluetooth
+  GPSSerial.begin(9600);//Iniciamos el puerto serie del gps
+  GPSSerial.flush();
+  HC06.begin(230400);//Iniciamos el puerto serie del bluetooth
+  //HC06.begin(9600);//Iniciamos el puerto serie del bluetooth
   HC06.flush();
   if (!SD.begin(shieldSDPin)) {
     //Serial.println(" failed!");
-    digitalWrite(ledGY88, HIGH);
+    digitalWrite(ledArchivoPin, HIGH);
     while(true);
   }
   //SD.begin(shieldSDPin);
@@ -158,7 +163,7 @@ void setup() {
   setearPines();
   inicializar();  
   //Imprimimos:
-  Serial.begin(9600);
+  //Serial.begin(9600);
   //analogWrite(TIP120pin, 0);
   actualizarParametrosDesdeSD();
 }
@@ -200,7 +205,7 @@ void MQ7()
         analogWrite(TIP120pin, velCooler); // By changing values from 0 to 255 you can control motor speed
         flagSensorMQ7=true;
         escribirEventoEnSD("HumoOn",false);
-        contadorH=100;
+        contadorH=30;
       }
     }
     else
@@ -228,7 +233,7 @@ void MQ7()
         //analogWrite(DAC0, 0); // By changing values from 0 to 255 you can control motor speed
         flagSensorMQ7=false;
         escribirEventoEnSD("HumoOff",false);
-        contadorHD=100;
+        contadorHD=30;
       }
     }
     else
@@ -238,7 +243,6 @@ void MQ7()
     }
   }
 }
-
 int16_t Maximo(int16_t a, int16_t b)
 {
   return (((a) > (b)) ?  (a) : (b));
@@ -249,8 +253,9 @@ boolean modoNocturno(int h, int m)
   Serial.println(limiteHoraInicialNoche);
   Serial.println(m);
   Serial.println(limiteMinutosInicialNoche);*/
-  
-  return (hardCodModoNocturno||((h>limiteHoraInicialNoche&&m>limiteMinutosInicialNoche)||(h<limiteHoraFinalNoche&&m<limiteMinutosFinalNoche)));
+  return (hardCodModoNocturno||((h>limiteHoraInicialNoche)||(h<limiteHoraFinalNoche)));
+
+  //return (hardCodModoNocturno||((h>limiteHoraInicialNoche&&m>limiteMinutosInicialNoche)||(h<limiteHoraFinalNoche&&m<limiteMinutosFinalNoche)));
 }
 
 void Fotoresistencia()
@@ -272,7 +277,7 @@ void Fotoresistencia()
       //escribirEventoEnSD("ApagarLuces",false);
       digitalWrite(ledFotoresistenciaPin, LOW);
       flagSensorFotoresistencia=true;
-      contFotoresistencia=100;
+      contFotoresistencia=25;
     }
     else
       contFotoresistencia--;
@@ -371,7 +376,8 @@ void GPS()
         if(filtroGPS()==true&&movimiento()==true)
         {
           escribirLineaDeTrakingEnSD();
-          if(cuantificarVelocidad(gps.f_speed_kmph())>limVel)
+          Acelerometro();
+          if(cuantificarVelocidad(gps.f_speed_kmph())>limVel&&acelerometroActivo)
           {
             digitalWrite(ledExcesoVelPin, HIGH);
             if(!flagExesoVel)
@@ -393,6 +399,7 @@ void GPS()
       }
     }
   }
+  
 }
 void calibrarGPS()
 {
@@ -491,19 +498,21 @@ void Acelerometro()
   rz=abs(az2-az)/transcurridos;
 
 
-  if(movimiento()&&(cuantificarAcelerometro(rx)>limiteAc||cuantificarAcelerometro(ry)>limiteAc))
+  if(movimiento()||(cuantificarAcelerometro(rx)>limiteAc||cuantificarAcelerometro(ry)>limiteAc))
   {
-    digitalWrite(ledGY88, true);
+    acelerometroActivo=true;
+    /*digitalWrite(ledGY88, true);
     int16_t m=Maximo(cuantificarAcelerometro(rx),cuantificarAcelerometro(ry));
     String auxs="AceleracionBruzca(";
     auxs.concat(m);
     auxs.concat(")");
     escribirEventoEnSD(auxs,false);
-    Reproducir(aceleracionBruzca);
+    Reproducir(aceleracionBruzca);*/
   }
   else
   {
-    digitalWrite(ledGY88, false);
+    acelerometroActivo=false;
+    //digitalWrite(ledGY88, false);
   }
 }
 
@@ -534,6 +543,7 @@ void escribirEventoEnSD(String evento,boolean exesoVel)
   
   Archivo = SD.open(fileNameEvento, FILE_WRITE);
   if (Archivo) {  
+    Archivo.print("#");
     Archivo.print(evento);
     if(gpsSincronizado==true)
     {
@@ -542,10 +552,11 @@ void escribirEventoEnSD(String evento,boolean exesoVel)
       
       if(exesoVel==true)
       {
-        Archivo.print("#"); Archivo.print(gps.satellites()); Archivo.print("Satelites");   
+        Archivo.print("#"); Archivo.print(gps.satellites()); Archivo.print("S");   
         Archivo.print("#"); Archivo.print(cuantificarVelocidad(maxVel)); Archivo.print("kmph"); 
       }
     }
+    Archivo.print("*");
     Archivo.println();
     Archivo.close();
     
@@ -564,8 +575,8 @@ void escribirLineaDeTrakingEnSD()
       Archivo.print("#"); Archivo.print(latitude,5); Archivo.print(","); Archivo.print(longitude,5);
       Archivo.print("#"); Archivo.print(day, DEC); Archivo.print("/"); Archivo.print(month, DEC); Archivo.print("/"); Archivo.print(year);
       Archivo.print("#"); Archivo.print(hour, DEC); Archivo.print(":"); Archivo.print(minute, DEC); Archivo.print(":"); Archivo.print(second, DEC); Archivo.print("."); Archivo.print(hundredths, DEC);
-      Archivo.print("#"); Archivo.print(gps.f_altitude()); Archivo.print("metros |"); Archivo.print(gps.f_course()); Archivo.print("grados |"); Archivo.print(gps.satellites()); Archivo.print("Satelites");   
-      Archivo.print("#"); Archivo.print(cuantificarVelocidad(gps.f_speed_kmph())); Archivo.print("kmph"); 
+      Archivo.print("#"); Archivo.print(gps.f_altitude()); Archivo.print("m |"); Archivo.print(gps.f_course()); Archivo.print("g |"); Archivo.print(gps.satellites()); Archivo.print("S");   
+      Archivo.print("#"); Archivo.print(cuantificarVelocidad(gps.f_speed_kmph())); Archivo.print("kmph*"); 
       Archivo.println();
     }
     Archivo.close();
@@ -587,6 +598,7 @@ void actualizarParametrosEnSD()
       Archivo.print("|"); Archivo.print(sensorMQ7VoltajeLimiteInf); 
       Archivo.println();
     Archivo.close();
+    //Reproducir(parametroModificado);
   }
   else {
     return; //problemas abriendo dtxt, se muestra por pantalla.
@@ -600,6 +612,60 @@ int posCarac(String s,const char op)
     if(s[i]==op)
       pos=i;
   return pos;
+}
+
+void enviarBT(String linea)
+{
+  //contadoraux=contadoraux+1;
+  HC06.print(linea);
+  //HC06.print(contadoraux);
+  delay(150);
+  HC06.flush();
+}
+
+boolean validarCaracter(char s)
+{
+  return ((s>='a'&&s<='z')||(s>='A'&&s<='Z')||(s>='0'&&s<='9')||(s=='#')||(s=='*')||(s=='|')||(s==':')||(s=='.')||(s=='/')||(s==',')||(s==' '));
+}
+
+void enviarArchivo(String file)
+{
+  Archivo = SD.open(file, FILE_READ);
+  String linea="";
+  char caracter;
+  if (Archivo) {
+      if(file.equals(fileNameTraking))
+      {
+        enviarBT("<01");
+      }
+      else
+      {
+        enviarBT("<02");
+      }
+      while (Archivo.available()) {  
+        caracter=Archivo.read();
+        if(validarCaracter(caracter))
+        {
+          linea=linea+caracter;
+        }
+        if(caracter=='*')
+        {
+          enviarBT(linea);
+          linea="";
+        }
+      }
+      /*if(!linea.equals(""))
+      {
+          enviarBT(linea);
+          linea="";
+      }*/
+      enviarBT(">");
+      Archivo.close();     
+    
+  }
+  else {
+    return; //problemas abriendo dtxt, se muestra por pantalla.
+  }
 }
 
 void actualizarParametrosDesdeSD()
@@ -647,122 +713,168 @@ void actualizarParametrosDesdeSD()
 
 void Bluetooth()
 {
-  String linea="",op="",operando="";
+  String op="",operando="",codigo="",msj="";
   accionValida=false;
+  accionConfirmar=true;
+  boolean set=false;
+  char data='#';
   
-  Serial.flush();
-  HC06.flush();
-  while (HC06.available()) {      
-    char data=HC06.read();
-    if(data != ' ')
-    {
-      linea=linea+data;
-      flagBT=true;
-    }
-    Serial.flush();
-    HC06.flush();
+    while(HC06.available()) {  
+    
+    //do
+    //{
+      data=HC06.read();
+      //Serial.print(data); 
+      if(data != '*')
+      {
+        linea=linea+data;
+        //data='⸮';
+      }
+      else {
+        if(!flagBT)
+          flagBT=true;
+      }
+    //}while(data != '*');
+    
   }
-  if(flagBT)
-  {
-    Serial.print(linea);
-    found = posCarac(linea,'#');
-    for(int i=0;i<found;i++)
-      op+=linea[i];
-    for(int i=found+1;i<linea.length();i++)
-      operando+=linea[i];
+  HC06.flush();
+  //Serial.println();
   
-    if(op.equals("setVel"))
-    {
-      limVel = operando.toInt();
-      actualizarParametrosEnSD();
-      accionValida=true;
-    }
-    else if(op.equals("setMQ7"))
-    {
-      sensorMQ7VoltajeLimite = operando.toFloat();
-      sensorMQ7VoltajeLimiteInf = operando.toFloat()-0.20;
-      actualizarParametrosEnSD();
-      accionValida=true;
-    }
-    else if(op.equals("setModoNoc"))
-    {
-      if(operando.equals("true"))
-      {
-        hardCodModoNocturno=true;
-        accionValida=true;
-      }
-      else if(operando.equals("false"))
-      {
-        hardCodModoNocturno=false;
-        accionValida=true;
-      }
-    }
-    else if(op.equals("clear"))
-    {
-      if(operando.equals("all"))
-      {
-        if(SD.exists(fileNameTraking))
-          SD.remove(fileNameTraking);
-        if(SD.exists(fileNameEvento))
-          SD.remove(fileNameEvento);
-        if(gpsSincronizado)
-          escribirLineaDeTrakingEnSD();
-        accionValida=true;
-      }
-      else if(operando.equals("traking"))
-      {
-        if(SD.exists(fileNameTraking))
-          SD.remove(fileNameTraking);
-        if(gpsSincronizado)
-          escribirLineaDeTrakingEnSD();
-        accionValida=true;
-      }
-      else if(operando.equals("evento"))
-      {
-        if(SD.exists(fileNameEvento))
-          SD.remove(fileNameEvento);
-        accionValida=true;
-      }
-    }
-    else if(operando.equals("getVel"))
-    {
-      operando = "25";
-      HC06.print(operando);
-      accionValida=true;
-    }
-    else if(operando.equals("getMQ7"))
-    {
-      operando = "50";
-      HC06.print(operando);
-      accionValida=true;
-    }
-    else if(operando.equals("getFiles"))
-    {
-      // desarrollar.
-    }    
-    Serial.flush();
-    HC06.flush();
-    if(accionValida)
-      HC06.print('0');
-    else
-      HC06.print('1');
-    escribirLogEnSD(linea,accionValida);
+  if(flagBT && linea.equals("ACK"))
+  {
+    //Serial.println(linea); 
+    linea="";
     flagBT=false;
+  }
+  else if(flagBT)
+  { 
+      //Serial.println(linea); 
+    //if(!linea.equals("ACK"))
+    //{
+      found = posCarac(linea,'#');
+      for(int i=0;i<found;i++)
+        op+=linea[i];
+      for(int i=found+1;i<linea.length();i++)
+        operando+=linea[i];
+      linea="";
+      //Serial.println(op);
+      //Serial.println(operando);
+      if(op.equals("setVel"))
+      {
+        codigo="<06";
+        limVel = operando.toInt();
+        actualizarParametrosEnSD();
+        accionValida=true;
+        set=true;
+      }
+      else if(op.equals("setMQ7"))
+      {
+        codigo="<05";
+        sensorMQ7VoltajeLimite = operando.toFloat();
+        sensorMQ7VoltajeLimiteInf = operando.toFloat()-0.20;
+        actualizarParametrosEnSD();
+        accionValida=true;
+        set=true;
+      }
+      if(op.equals("get"))
+      {
+        if(operando.equals("MQ7"))
+        {
+          msj="<03";
+          msj.concat(sensorMQ7VoltajeLimite);
+          msj.concat(">");
+          HC06.print(msj);
+        }
+        if(operando.equals("Vel"))
+        {
+          msj="<04";
+          msj.concat(limVel);
+          msj.concat(">");
+          HC06.print(msj);
+        }
+        accionConfirmar=false;
+        
+      }
+      else if(op.equals("setModoNoc"))
+      {
+        if(operando.equals("true"))
+        {
+          hardCodModoNocturno=true;
+          accionValida=true;
+        }
+        else if(operando.equals("false"))
+        {
+          hardCodModoNocturno=false;
+          accionValida=true;
+        }
+      }
+      else if(op.equals("getFile"))
+      {
+        if(operando.equals("Tracking"))
+        {
+          enviarArchivo(fileNameTraking);
+        }
+        else if(operando.equals("Evento"))
+        {
+          enviarArchivo(fileNameEvento);
+        }
+        accionConfirmar=false;
+      }
+      else if(op.equals("clear"))
+      {
+        if(operando.equals("all"))
+        {
+          codigo="<07";
+          if(SD.exists(fileNameTraking))
+            SD.remove(fileNameTraking);
+          if(SD.exists(fileNameEvento))
+            SD.remove(fileNameEvento);
+          if(gpsSincronizado)
+            escribirLineaDeTrakingEnSD();
+          accionValida=true;
+        }
+        else if(operando.equals("tracking"))
+        {
+          codigo="<08";
+          if(SD.exists(fileNameTraking))
+            SD.remove(fileNameTraking);
+          if(gpsSincronizado)
+            escribirLineaDeTrakingEnSD();
+          accionValida=true;
+        }
+        else if(operando.equals("evento"))
+        {
+          codigo="<09";
+          if(SD.exists(fileNameEvento))
+            SD.remove(fileNameEvento);
+          accionValida=true;
+        }
+      }
+      if(accionConfirmar)
+      {
+        if(accionValida)
+        {
+          msj.concat(codigo);
+          msj.concat("true>");
+          HC06.print(msj);
+        }
+        else
+          HC06.print("<99false>");
+        escribirLogEnSD(linea,accionValida);
+      }
+    //}
+    flagBT=false;
+    if(set)
+    {
+      Reproducir(parametroModificado);
+    }
   }
 }
 
-
 void loop() {
-  //Serial.println("1");
-  if(a)
-  {
-    Serial.println("Hola");
-    a = false;
-  }
-  // GPS();
-  // Fotoresistencia();
-  // MQ7();
-  // Acelerometro();
+  GPS();
+  Fotoresistencia();
+  MQ7();
   Bluetooth(); 
-  // digitalWrite(ledONPin, true);
+  digitalWrite(ledONPin, true);
 }
